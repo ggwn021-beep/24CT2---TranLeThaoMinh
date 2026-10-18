@@ -7,26 +7,23 @@ const router = createRouter({
   routes: [
     { path: '/', component: HomeView },
     { path: '/hotel/:id', component: HotelDetailView },
-    { path: '/booking', component: () => import('../views/BookingView.vue'), meta: { requiresAuth: true } },
-    { path: '/login', component: () => import('../views/LoginView.vue') },
-    { path: '/staff', component: () => import('../views/StaffDashboard.vue'), meta: { requiresRole: 'staff' } },
-    { path: '/admin', component: () => import('../views/AdminDashboard.vue'), meta: { requiresRole: 'admin' } },
+    { path: '/login', component: () => import('../views/LoginView.vue'), meta: { guestOnly: true } },
+    { path: '/register', component: () => import('../views/RegisterView.vue'), meta: { guestOnly: true } },
+    { path: '/profile', component: () => import('../views/ProfileView.vue'), meta: { requiresAuth: true } },
+    { path: '/booking', component: () => import('../views/BookingView.vue'), meta: { roles: ['customer'] } },
+    { path: '/account', component: () => import('../views/AccountView.vue'), meta: { roles: ['customer'] } },
+    { path: '/support', component: () => import('../views/SupportView.vue'), meta: { roles: ['staff', 'admin'] } },
+    { path: '/staff', component: () => import('../views/StaffDashboard.vue'), meta: { roles: ['staff'] } },
+    { path: '/admin', component: () => import('../views/AdminDashboard.vue'), meta: { roles: ['admin'] } },
   ]
 })
 
-router.beforeEach((to, from, next) => {
-  const saved = localStorage.getItem('user')
-  const user = saved ? JSON.parse(saved) : null
-
-  if (to.meta.requiresAuth && !user) {
-    alert('Vui lòng đăng nhập trước')
-    return next('/login')
-  }
-  if (to.meta.requiresRole && (!user || user.vai_tro !== to.meta.requiresRole)) {
-    alert('Bạn không có quyền truy cập trang này')
-    return next('/')
-  }
-  next()
+router.beforeEach((to) => {
+  const user = JSON.parse(localStorage.getItem('user') || 'null')
+  if (to.meta.guestOnly && user) return '/'
+  if ((to.meta.requiresAuth || to.meta.roles) && !user) return { path: '/login', query: { redirect: to.fullPath } }
+  if (to.meta.roles && !to.meta.roles.includes(user.vai_tro)) return { path: '/', query: { denied: '1' } }
+  return true
 })
 
 export default router

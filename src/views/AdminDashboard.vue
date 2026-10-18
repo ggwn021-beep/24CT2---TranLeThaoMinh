@@ -1,129 +1,194 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+
+const API = 'http://localhost:3000'
+const JSON_HEADERS = { 'Content-Type': 'application/json' }
 
 const rooms = ref([])
 const bookings = ref([])
-const stats = ref({ doanh_thu: 0, tong_don: 0, dang_o: 0 })
 const staffList = ref([])
+const shifts = ref([])
+const report = ref([])
+const stats = ref({ doanh_thu: 0, tong_don: 0, dang_o: 0 })
+const kieu = ref('ngay')
+const kieuList = [{ v: 'ngay', l: 'Theo ngày' }, { v: 'thang', l: 'Theo tháng' }, { v: 'nam', l: 'Theo năm' }]
 
 const newRoom = ref({ ten_phong: '', loai_phong: 'Standard', gia_dem: '' })
-const newStaff = ref({ ten_dang_nhap: '', mat_khau: '', ho_ten: '' })
+const newStaff = ref({ ho_ten: '', email: '', mat_khau: '' })
+const editingId = ref(null)
+const editForm = ref({})
 
-async function loadAll() {
-  rooms.value = await (await fetch('http://localhost:3000/api/phong')).json()
-  bookings.value = await (await fetch('http://localhost:3000/api/dondat')).json()
-  stats.value = await (await fetch('http://localhost:3000/api/thongke')).json()
-  staffList.value = await (await fetch('http://localhost:3000/api/nhanvien')).json()
+async function getJson(url) { return (await fetch(`${API}${url}`)).json() }
+async function call(url, method, body) {
+  const res = await fetch(`${API}${url}`, { method, headers: JSON_HEADERS, body: body ? JSON.stringify(body) : undefined })
+  const data = await res.json()
+  if (!res.ok) { alert(data.error); return null }
+  return data
 }
+
+async function loadReport() { report.value = await getJson(`/api/doanhthu?kieu=${kieu.value}`) }
+async function loadAll() {
+  rooms.value = await getJson('/api/phong')
+  bookings.value = await getJson('/api/dondat')
+  stats.value = await getJson('/api/thongke')
+  staffList.value = await getJson('/api/nhanvien')
+  shifts.value = await getJson('/api/ca')
+  await loadReport()
+}
+function chonKieu(v) { kieu.value = v; loadReport() }
 
 async function addRoom() {
-  if (!newRoom.value.ten_phong || !newRoom.value.gia_dem) return alert('Nhập đủ thông tin')
-  await fetch('http://localhost:3000/api/phong', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newRoom.value)
-  })
-  newRoom.value = { ten_phong: '', loai_phong: 'Standard', gia_dem: '' }
-  loadAll()
+  if (await call('/api/phong', 'POST', newRoom.value)) { newRoom.value = { ten_phong: '', loai_phong: 'Standard', gia_dem: '' }; loadAll() }
 }
-
-async function deleteRoom(id) {
-  if (!confirm('Xóa phòng này?')) return
-  const res = await fetch(`http://localhost:3000/api/phong/${id}`, { method: 'DELETE' })
-  const data = await res.json()
-  if (!res.ok) return alert(data.error)
-  loadAll()
-}
+function startEdit(r) { editingId.value = r.id_phong; editForm.value = { ten_phong: r.ten_phong, loai_phong: r.loai_phong, gia_dem: Number(r.gia_dem), trang_thai: r.trang_thai } }
+async function saveEdit() { if (await call(`/api/phong/${editingId.value}`, 'PUT', editForm.value)) { editingId.value = null; loadAll() } }
+async function deleteRoom(id) { if (confirm('Xóa phòng này?') && await call(`/api/phong/${id}`, 'DELETE')) loadAll() }
 
 async function addStaff() {
-  if (!newStaff.value.ten_dang_nhap || !newStaff.value.mat_khau) return alert('Nhập đủ thông tin')
-  const res = await fetch('http://localhost:3000/api/nhanvien', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(newStaff.value)
-  })
-  const data = await res.json()
-  if (!res.ok) return alert(data.error)
-  newStaff.value = { ten_dang_nhap: '', mat_khau: '', ho_ten: '' }
-  loadAll()
+  if (await call('/api/nhanvien', 'POST', newStaff.value)) { newStaff.value = { ho_ten: '', email: '', mat_khau: '' }; loadAll() }
 }
-
 async function toggleLock(nv) {
-  const action = nv.trang_thai_tk === 'locked' ? 'mokhoa' : 'khoa'
-  await fetch(`http://localhost:3000/api/nhanvien/${nv.id_tai_khoan}/${action}`, { method: 'PUT' })
+  await call(`/api/nhanvien/${nv.id_tai_khoan}/${nv.trang_thai_tk === 'locked' ? 'mokhoa' : 'khoa'}`, 'PUT')
   loadAll()
 }
 
+const maxRevenue = computed(() => Math.max(1, ...report.value.map(r => Number(r.doanh_thu))))
 onMounted(loadAll)
 </script>
 
 <template>
-  <div class="page">
-    <h1>🛠️ Admin Dashboard</h1>
-    <div class="stats">
-      <div class="stat-card"><p>Tổng doanh thu</p><h2>{{ Number(stats.doanh_thu).toLocaleString() }}đ</h2></div>
-      <div class="stat-card"><p>Tổng đơn đặt</p><h2>{{ stats.tong_don }}</h2></div>
-      <div class="stat-card"><p>Phòng đang có khách</p><h2>{{ stats.dang_o }}</h2></div>
-    </div>
+  <div>
+    <header class="navbar">
+      <RouterLink to="/" class="logo">🏨 Sunrise Hotel & Resort</RouterLink>
+      <nav>
+        <RouterLink to="/support">Hỗ trợ & Đánh giá</RouterLink>
+        <RouterLink to="/">Trang chủ</RouterLink>
+      </nav>
+    </header>
 
-    <h3>Quản lý phòng</h3>
-    <div class="add-form">
-      <input v-model="newRoom.ten_phong" placeholder="Tên phòng (VD: P301 - View núi)" />
-      <select v-model="newRoom.loai_phong">
-        <option>Standard</option><option>VIP</option><option>Resort</option>
-      </select>
-      <input v-model="newRoom.gia_dem" type="number" placeholder="Giá/đêm" />
-      <button @click="addRoom">+ Thêm phòng</button>
-    </div>
-    <table class="admin-table">
-      <thead><tr><th>Tên phòng</th><th>Loại</th><th>Giá</th><th>Trạng thái</th><th></th></tr></thead>
-      <tbody>
-        <tr v-for="r in rooms" :key="r.id_phong">
-          <td>{{ r.ten_phong }}</td><td>{{ r.loai_phong }}</td>
-          <td>{{ Number(r.gia_dem).toLocaleString() }}đ</td><td>{{ r.trang_thai }}</td>
-          <td><button class="del-btn" @click="deleteRoom(r.id_phong)">Xóa</button></td>
-        </tr>
-      </tbody>
-    </table>
+    <div class="page-container">
+      <h1 class="title">Admin Dashboard</h1>
 
-    <h3>Quản lý nhân viên</h3>
-    <div class="add-form">
-      <input v-model="newStaff.ten_dang_nhap" placeholder="Tên đăng nhập" />
-      <input v-model="newStaff.mat_khau" placeholder="Mật khẩu" />
-      <input v-model="newStaff.ho_ten" placeholder="Họ tên" />
-      <button @click="addStaff">+ Thêm nhân viên</button>
-    </div>
-    <table class="admin-table">
-      <thead><tr><th>Tên đăng nhập</th><th>Họ tên</th><th>Trạng thái</th><th></th></tr></thead>
-      <tbody>
-        <tr v-for="nv in staffList" :key="nv.id_tai_khoan">
-          <td>{{ nv.ten_dang_nhap }}</td><td>{{ nv.ho_ten }}</td>
-          <td>{{ nv.trang_thai_tk === 'locked' ? '🔒 Đã khóa' : '✅ Hoạt động' }}</td>
-          <td><button class="del-btn" @click="toggleLock(nv)">{{ nv.trang_thai_tk === 'locked' ? 'Mở khóa' : 'Khóa' }}</button></td>
-        </tr>
-      </tbody>
-    </table>
+      <div class="stats-row">
+        <div class="stat-card"><p>Tổng doanh thu đã thu</p><h2>{{ Number(stats.doanh_thu).toLocaleString() }}đ</h2></div>
+        <div class="stat-card"><p>Tổng đơn đặt</p><h2>{{ stats.tong_don }}</h2></div>
+        <div class="stat-card"><p>Phòng đang có khách</p><h2>{{ stats.dang_o }}</h2></div>
+      </div>
 
-    <h3>Toàn bộ đơn đặt phòng</h3>
-    <table class="admin-table">
-      <thead><tr><th>Khách</th><th>Phòng</th><th>Tiền</th><th>Trạng thái</th></tr></thead>
-      <tbody>
-        <tr v-for="b in bookings" :key="b.id_don">
-          <td>{{ b.ten_khach }}</td><td>{{ b.ten_phong }}</td>
-          <td>{{ Number(b.tong_tien).toLocaleString() }}đ</td><td>{{ b.trang_thai_don }}</td>
-        </tr>
-      </tbody>
-    </table>
+      <h2 class="section-title">Báo cáo doanh thu</h2>
+      <div class="tabs">
+        <button v-for="k in kieuList" :key="k.v" :class="['btn btn-sm', kieu === k.v ? 'btn-primary' : 'btn-outline']" @click="chonKieu(k.v)">{{ k.l }}</button>
+      </div>
+      <div class="table-wrap">
+        <table class="t">
+          <thead><tr><th>Kỳ</th><th>Số đơn</th><th>Doanh thu</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="r in report" :key="r.ky">
+              <td>{{ r.ky }}</td><td>{{ r.so_don }}</td>
+              <td>{{ Number(r.doanh_thu).toLocaleString() }}đ</td>
+              <td><div class="bar"><div class="bar-fill" :style="{ width: (Number(r.doanh_thu) / maxRevenue * 100) + '%' }"></div></div></td>
+            </tr>
+            <tr v-if="report.length === 0"><td colspan="4" class="muted" style="text-align:center">Chưa có khoản thu nào</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="section-title">Quản lý phòng</h2>
+      <div class="card card-pad add-form">
+        <input v-model="newRoom.ten_phong" class="input" placeholder="Tên phòng (VD: P301 - View núi)" />
+        <select v-model="newRoom.loai_phong" class="input"><option>Standard</option><option>VIP</option><option>Resort</option></select>
+        <input v-model="newRoom.gia_dem" type="number" class="input" placeholder="Giá/đêm" />
+        <button class="btn btn-primary" @click="addRoom">+ Thêm phòng</button>
+      </div>
+      <div class="table-wrap" style="margin-top:14px">
+        <table class="t">
+          <thead><tr><th>Tên phòng</th><th>Loại</th><th>Giá/đêm</th><th>Trạng thái</th><th></th></tr></thead>
+          <tbody>
+            <template v-for="r in rooms" :key="r.id_phong">
+              <tr v-if="editingId !== r.id_phong">
+                <td>{{ r.ten_phong }}</td><td>{{ r.loai_phong }}</td>
+                <td>{{ Number(r.gia_dem).toLocaleString() }}đ</td>
+                <td><span :class="['badge', r.trang_thai === 'Sẵn sàng' ? 'badge-green' : 'badge-orange']">{{ r.trang_thai }}</span></td>
+                <td><div class="actions">
+                  <button class="btn btn-outline btn-sm" @click="startEdit(r)">Sửa</button>
+                  <button class="btn btn-danger btn-sm" @click="deleteRoom(r.id_phong)">Xóa</button>
+                </div></td>
+              </tr>
+              <tr v-else>
+                <td><input v-model="editForm.ten_phong" class="input" /></td>
+                <td><select v-model="editForm.loai_phong" class="input"><option>Standard</option><option>VIP</option><option>Resort</option></select></td>
+                <td><input v-model="editForm.gia_dem" type="number" class="input" /></td>
+                <td><select v-model="editForm.trang_thai" class="input"><option>Sẵn sàng</option><option>Đang thuê</option><option>Bảo trì</option></select></td>
+                <td><div class="actions">
+                  <button class="btn btn-primary btn-sm" @click="saveEdit">Lưu</button>
+                  <button class="btn btn-outline btn-sm" @click="editingId = null">Hủy</button>
+                </div></td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="section-title">Quản lý nhân viên</h2>
+      <div class="card card-pad add-form">
+        <input v-model="newStaff.ho_ten" class="input" placeholder="Họ tên" />
+        <input v-model="newStaff.email" class="input" placeholder="Email" />
+        <input v-model="newStaff.mat_khau" class="input" placeholder="Mật khẩu (chữ + số)" />
+        <button class="btn btn-primary" @click="addStaff">+ Thêm nhân viên</button>
+      </div>
+      <div class="table-wrap" style="margin-top:14px">
+        <table class="t">
+          <thead><tr><th>Họ tên</th><th>Email / Tên đăng nhập</th><th>Trạng thái</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="nv in staffList" :key="nv.id_tai_khoan">
+              <td>{{ nv.ho_ten }}</td><td>{{ nv.email || nv.ten_dang_nhap }}</td>
+              <td><span :class="['badge', nv.trang_thai_tk === 'locked' ? 'badge-red' : 'badge-green']">{{ nv.trang_thai_tk === 'locked' ? 'Đã khóa' : 'Hoạt động' }}</span></td>
+              <td><button class="btn btn-outline btn-sm" @click="toggleLock(nv)">{{ nv.trang_thai_tk === 'locked' ? 'Mở khóa' : 'Khóa' }}</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="section-title">Lịch sử ca làm việc</h2>
+      <div class="table-wrap">
+        <table class="t">
+          <thead><tr><th>Nhân viên</th><th>Bắt đầu</th><th>Kết thúc</th><th>Thu trong ca</th></tr></thead>
+          <tbody>
+            <tr v-for="c in shifts" :key="c.id_ca">
+              <td>{{ c.ten_nhan_vien }}</td>
+              <td>{{ c.gio_bat_dau.slice(0, 16) }}</td>
+              <td>{{ c.gio_ket_thuc ? c.gio_ket_thuc.slice(0, 16) : 'Đang mở' }}</td>
+              <td>{{ Number(c.tong_doanh_thu).toLocaleString() }}đ</td>
+            </tr>
+            <tr v-if="shifts.length === 0"><td colspan="4" class="muted" style="text-align:center">Chưa có ca nào</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="section-title">Toàn bộ đơn đặt phòng</h2>
+      <div class="table-wrap">
+        <table class="t">
+          <thead><tr><th>Khách</th><th>Phòng</th><th>Ngày ở</th><th>Tiền</th><th>Trạng thái</th></tr></thead>
+          <tbody>
+            <tr v-for="b in bookings" :key="b.id_don">
+              <td>{{ b.ten_khach }}</td><td>{{ b.ten_phong }}</td>
+              <td>{{ b.ngay_nhan_phong }} → {{ b.ngay_tra_phong }}</td>
+              <td>{{ Number(b.tong_tien).toLocaleString() }}đ</td><td>{{ b.trang_thai_don }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.page { max-width: 1100px; margin: 0 auto; padding: 20px; }
-.stats { display: flex; gap: 15px; margin-bottom: 25px; }
-.stat-card { background: white; padding: 15px 25px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); flex: 1; }
-.stat-card h2 { color: #2563eb; }
-.admin-table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; margin-bottom: 25px; }
-.admin-table th, .admin-table td { padding: 10px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
-.admin-table th { background: #f1f5f9; }
-
-.add-form { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
-.add-form input, .add-form select { padding: 8px; border: 1px solid #ddd; border-radius: 6px; }
-.add-form button { background: #2563eb; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
-.del-btn { background: #dc2626; color: white; border: none; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+.title { color: var(--color-primary); }
+.add-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.add-form .input { flex: 1; min-width: 160px; }
+.actions { display: flex; gap: 6px; }
+.tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+.bar { background: #f1f5f9; border-radius: 6px; height: 10px; min-width: 120px; }
+.bar-fill { background: var(--color-accent); height: 10px; border-radius: 6px; }
+.muted { color: var(--color-text-light); font-size: 13px; }
 </style>

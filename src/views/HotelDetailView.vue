@@ -7,50 +7,56 @@ const router = useRouter()
 const room = ref(null)
 const loading = ref(true)
 
+const roomImages = {
+  VIP: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=1000&q=80',
+  Standard: 'https://images.unsplash.com/photo-1631049307264-da0ec9d70304?w=1000&q=80',
+  Resort: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?w=1000&q=80'
+}
+
 async function loadRoom() {
   try {
     const res = await fetch(`http://localhost:3000/api/phong/${route.params.id}`)
-    if (!res.ok) throw new Error('Không tìm thấy phòng')
+    if (!res.ok) throw new Error()
     room.value = await res.json()
-  } catch (err) {
-    console.error(err)
-  } finally {
-    loading.value = false
-  }
+  } catch { room.value = null } finally { loading.value = false }
 }
 
 function bookRoom() {
-  router.push({
-    path: '/booking',
-    query: { roomId: room.value.id_phong, roomType: room.value.loai_phong, price: room.value.gia_dem }
-  })
+  router.push({ path: '/booking', query: { roomId: room.value.id_phong, roomType: room.value.loai_phong, price: room.value.gia_dem } })
 }
 
 onMounted(loadRoom)
 </script>
 
 <template>
-  <div class="page" v-if="room">
-    <h1>{{ room.ten_phong }}</h1>
-    <p>Loại phòng: {{ room.loai_phong }}</p>
-    <p class="price">{{ Number(room.gia_dem).toLocaleString() }}đ / đêm</p>
-    <span :class="['badge', room.trang_thai === 'Sẵn sàng' ? 'green' : 'orange']">{{ room.trang_thai }}</span>
+  <div>
+    <header class="navbar"><RouterLink to="/" class="logo">🏨 Sunrise Hotel & Resort</RouterLink><nav><RouterLink to="/">← Về trang chủ</RouterLink></nav></header>
 
-    <button class="book-btn" @click="bookRoom" :disabled="room.trang_thai !== 'Sẵn sàng'">
-      {{ room.trang_thai === 'Sẵn sàng' ? 'Đặt ngay' : 'Phòng không khả dụng' }}
-    </button>
-  </div>
-  <div class="page" v-else-if="!loading">
-    <p>Không tìm thấy phòng này.</p>
-    <RouterLink to="/">← Về trang chủ</RouterLink>
+    <div class="page-container narrow" v-if="room">
+      <div class="banner" :style="{ backgroundImage: `url(${roomImages[room.loai_phong] || roomImages.Standard})` }"></div>
+      <div class="card card-pad">
+        <span class="room-type">{{ room.loai_phong }}</span>
+        <h1>{{ room.ten_phong }}</h1>
+        <p class="price">{{ Number(room.gia_dem).toLocaleString() }}đ <span>/ đêm</span></p>
+        <span :class="['badge', room.trang_thai === 'Sẵn sàng' ? 'badge-green' : 'badge-orange']">{{ room.trang_thai }}</span>
+
+        <button class="btn btn-primary btn-block" style="margin-top:24px" @click="bookRoom" :disabled="room.trang_thai !== 'Sẵn sàng'">
+          {{ room.trang_thai === 'Sẵn sàng' ? 'Đặt ngay' : 'Phòng không khả dụng' }}
+        </button>
+      </div>
+    </div>
+    <div class="page-container narrow" v-else-if="!loading">
+      <p>Không tìm thấy phòng này.</p>
+      <RouterLink to="/">← Về trang chủ</RouterLink>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.page { max-width: 600px; margin: 0 auto; padding: 20px; }
-.price { color: #2563eb; font-weight: bold; font-size: 18px; margin: 10px 0; }
-.badge { padding: 4px 12px; border-radius: 12px; font-size: 13px; color: white; }
-.badge.green { background: #16a34a; } .badge.orange { background: #f59e0b; }
-.book-btn { display: block; margin-top: 20px; width: 100%; background: #2563eb; color: white; border: none; padding: 12px; border-radius: 8px; cursor: pointer; font-size: 15px; }
-.book-btn:disabled { background: #9ca3af; cursor: not-allowed; }
+.banner { height: 260px; border-radius: var(--radius); background-size: cover; background-position: center; margin-bottom: -40px; box-shadow: var(--shadow); }
+.card { position: relative; margin-top: 60px; }
+.room-type { font-size: 11.5px; color: var(--color-accent-dark); font-weight: 800; text-transform: uppercase; letter-spacing: 0.6px; }
+h1 { color: var(--color-primary); margin: 8px 0 6px; font-size: 24px; }
+.price { color: var(--color-primary); font-weight: 800; font-size: 22px; margin: 0 0 12px; }
+.price span { color: var(--color-text-light); font-weight: 400; font-size: 14px; }
 </style>

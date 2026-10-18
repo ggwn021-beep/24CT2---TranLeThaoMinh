@@ -1,102 +1,150 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+
+const API = 'http://localhost:3000'
+const JSON_HEADERS = { 'Content-Type': 'application/json' }
+const user = JSON.parse(localStorage.getItem('user'))
 
 const bookingList = ref([])
-const isShiftActive = ref(false)
-const shiftStart = ref(null)
-const collectedToday = ref(0)
+const ca = ref(null)
+const history = ref([])
+const report = ref([])
+const kieu = ref('ngay')
+const kieuList = [{ v: 'ngay', l: 'Theo ngày' }, { v: 'thang', l: 'Theo tháng' }, { v: 'nam', l: 'Theo năm' }]
 
-async function loadBookings() {
-  const res = await fetch('http://localhost:3000/api/dondat')
-  bookingList.value = await res.json()
+async function getJson(url) { return (await fetch(`${API}${url}`)).json() }
+async function call(url, method, body) {
+  const res = await fetch(`${API}${url}`, { method, headers: JSON_HEADERS, body: body ? JSON.stringify(body) : undefined })
+  const data = await res.json()
+  if (!res.ok) { alert(data.error); return null }
+  return data
 }
 
-function startShift() {
-  isShiftActive.value = true
-  shiftStart.value = new Date().toLocaleTimeString()
-  collectedToday.value = 0
+async function loadReport() { report.value = await getJson(`/api/doanhthu?kieu=${kieu.value}&id_nhan_vien=${user.id_tai_khoan}`) }
+async function loadAll() {
+  bookingList.value = await getJson('/api/dondat')
+  ca.value = await getJson(`/api/ca/hien-tai/${user.id_tai_khoan}`)
+  history.value = await getJson(`/api/ca?id_nhan_vien=${user.id_tai_khoan}`)
+  await loadReport()
 }
+function chonKieu(v) { kieu.value = v; loadReport() }
 
-function endShift() {
-  alert(`Kết thúc ca. Tổng thu trong ca: ${collectedToday.value.toLocaleString()}đ`)
-  isShiftActive.value = false
+async function startShift() { if (await call('/api/ca/bat-dau', 'POST', { id_nhan_vien: user.id_tai_khoan })) loadAll() }
+async function endShift() {
+  if (!confirm('Kết thúc ca làm việc?')) return
+  const data = await call(`/api/ca/${ca.value.id_ca}/ket-thuc`, 'PUT')
+  if (data) { alert(`Đã kết thúc ca.\nTổng thu trong ca: ${Number(data.tong_doanh_thu).toLocaleString()}đ`); loadAll() }
 }
-
-async function confirmPayment(b) {
-  await fetch(`http://localhost:3000/api/dondat/${b.id_don}/xacnhan-thanhtoan`, { method: 'PUT' })
-  b.trang_thai_don = 'Đã xác nhận'
-  collectedToday.value += Number(b.tong_tien)
-}
-
-async function checkIn(b) {
-  if (b.trang_thai_don !== 'Đã xác nhận') { alert('Cần xác nhận thanh toán trước khi check-in!'); return }
-  await fetch(`http://localhost:3000/api/dondat/${b.id_don}/checkin`, { method: 'PUT' })
-  b.trang_thai_don = 'Đã check-in'
-}
-
-async function checkOut(b) {
-  await fetch(`http://localhost:3000/api/dondat/${b.id_don}/checkout`, { method: 'PUT' })
-  b.trang_thai_don = 'Đã hoàn tất'
-}
+async function confirmPayment(b) { if (await call(`/api/dondat/${b.id_don}/xacnhan-thanhtoan`, 'PUT', { id_nhan_vien: user.id_tai_khoan })) loadAll() }
+async function checkIn(b) { if (await call(`/api/dondat/${b.id_don}/checkin`, 'PUT')) loadAll() }
+async function checkOut(b) { if (await call(`/api/dondat/${b.id_don}/checkout`, 'PUT')) loadAll() }
 
 const totalPending = computed(() => bookingList.value.filter(b => b.trang_thai_don === 'Chờ duyệt').length)
+const maxRevenue = computed(() => Math.max(1, ...report.value.map(r => Number(r.doanh_thu))))
+function badgeClass(t) {
+  return { 'Chờ duyệt': 'badge-orange', 'Đã xác nhận': 'badge-blue', 'Đã check-in': 'badge-green', 'Đã hoàn tất': 'badge-gray', 'Đã hủy': 'badge-red' }[t] || 'badge-gray'
+}
 
-onMounted(loadBookings)
+onMounted(loadAll)
 </script>
 
 <template>
-  <div class="page">
-    <header class="staff-header">
-      <h1>👤 Staff Dashboard</h1>
-      <div class="shift-box">
-        <span v-if="isShiftActive">🟢 Đang trong ca (từ {{ shiftStart }})</span>
-        <span v-else>🔴 Chưa bắt đầu ca</span>
-        <button v-if="!isShiftActive" @click="startShift" class="btn-start">Bắt đầu ca</button>
-        <button v-else @click="endShift" class="btn-end">Kết thúc ca</button>
-      </div>
+  <div>
+    <header class="navbar">
+      <RouterLink to="/" class="logo">🏨 Sunrise Hotel & Resort</RouterLink>
+      <nav>
+        <RouterLink to="/support">Hỗ trợ khách</RouterLink>
+        <RouterLink to="/">Trang chủ</RouterLink>
+      </nav>
     </header>
 
-    <div class="stats">
-      <div class="stat-card"><p>Đơn chờ duyệt</p><h2>{{ totalPending }}</h2></div>
-      <div class="stat-card"><p>Đã thu trong ca</p><h2>{{ collectedToday.toLocaleString() }}đ</h2></div>
-    </div>
+    <div class="page-container">
+      <div class="top-row">
+        <h1 class="title">Staff Dashboard</h1>
+        <div class="shift-box">
+          <span :class="['badge', ca ? 'badge-green' : 'badge-gray']">
+            {{ ca ? `Đang trong ca (từ ${ca.gio_bat_dau.slice(11, 16)})` : 'Chưa bắt đầu ca' }}
+          </span>
+          <button v-if="!ca" class="btn btn-primary btn-sm" @click="startShift">Bắt đầu ca</button>
+          <button v-else class="btn btn-danger btn-sm" @click="endShift">Kết thúc ca</button>
+        </div>
+      </div>
+      <p v-if="!ca" class="warn">Bạn cần bấm "Bắt đầu ca" trước khi xác nhận thu tiền.</p>
 
-    <h3>Danh sách đơn đặt phòng</h3>
-    <table class="booking-table">
-      <thead><tr><th>Khách</th><th>Phòng</th><th>Ngày ở</th><th>Tiền</th><th>Trạng thái</th><th>Phương thức</th><th>Thao tác</th></tr></thead>
-      <tbody>
-        <tr v-for="b in bookingList" :key="b.id_don">
-          <td>{{ b.ten_khach }}</td>
-          <td>{{ b.ten_phong }}<br /><small>{{ b.loai_phong }}</small></td>
-          <td>{{ b.ngay_nhan_phong }} → {{ b.ngay_tra_phong }}</td>
-          <td>{{ Number(b.tong_tien).toLocaleString() }}đ</td>
-          <td><span class="badge">{{ b.trang_thai_don }}</span></td>
-          <td>{{ b.phuong_thuc_thanh_toan }}</td>
-          <td class="actions">
-            <button v-if="b.trang_thai_don === 'Chờ duyệt'" @click="confirmPayment(b)" class="btn-sm">Xác nhận TT</button>
-            <button v-if="b.trang_thai_don === 'Đã xác nhận'" @click="checkIn(b)" class="btn-sm blue">Check-in</button>
-            <button v-if="b.trang_thai_don === 'Đã check-in'" @click="checkOut(b)" class="btn-sm gray">Check-out</button>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+      <div class="stats-row">
+        <div class="stat-card"><p>Đơn chờ duyệt</p><h2>{{ totalPending }}</h2></div>
+        <div class="stat-card"><p>Đã thu trong ca</p><h2>{{ Number(ca ? ca.tong_doanh_thu : 0).toLocaleString() }}đ</h2></div>
+      </div>
+
+      <h2 class="section-title">Danh sách đơn đặt phòng</h2>
+      <div class="table-wrap">
+        <table class="t">
+          <thead><tr><th>Khách</th><th>Phòng</th><th>Ngày ở</th><th>Tiền</th><th>Trạng thái</th><th>Phương thức</th><th>Thao tác</th></tr></thead>
+          <tbody>
+            <tr v-for="b in bookingList" :key="b.id_don">
+              <td>{{ b.ten_khach }}</td>
+              <td>{{ b.ten_phong }}<br /><small class="muted">{{ b.loai_phong }}</small></td>
+              <td>{{ b.ngay_nhan_phong }} → {{ b.ngay_tra_phong }}</td>
+              <td>{{ Number(b.tong_tien).toLocaleString() }}đ</td>
+              <td><span :class="['badge', badgeClass(b.trang_thai_don)]">{{ b.trang_thai_don }}</span></td>
+              <td>{{ b.phuong_thuc_thanh_toan }}</td>
+              <td>
+                <div class="actions">
+                  <button v-if="b.trang_thai_don === 'Chờ duyệt'" class="btn btn-success btn-sm" :disabled="!ca" @click="confirmPayment(b)">Xác nhận TT</button>
+                  <button v-if="b.trang_thai_don === 'Đã xác nhận'" class="btn btn-primary btn-sm" @click="checkIn(b)">Check-in</button>
+                  <button v-if="b.trang_thai_don === 'Đã check-in'" class="btn btn-outline btn-sm" @click="checkOut(b)">Check-out</button>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="section-title">Doanh thu của tôi</h2>
+      <div class="tabs">
+        <button v-for="k in kieuList" :key="k.v" :class="['btn btn-sm', kieu === k.v ? 'btn-primary' : 'btn-outline']" @click="chonKieu(k.v)">{{ k.l }}</button>
+      </div>
+      <div class="table-wrap">
+        <table class="t">
+          <thead><tr><th>Kỳ</th><th>Số đơn</th><th>Doanh thu</th><th></th></tr></thead>
+          <tbody>
+            <tr v-for="r in report" :key="r.ky">
+              <td>{{ r.ky }}</td>
+              <td>{{ r.so_don }}</td>
+              <td>{{ Number(r.doanh_thu).toLocaleString() }}đ</td>
+              <td><div class="bar"><div class="bar-fill" :style="{ width: (Number(r.doanh_thu) / maxRevenue * 100) + '%' }"></div></div></td>
+            </tr>
+            <tr v-if="report.length === 0"><td colspan="4" class="muted" style="text-align:center">Chưa có khoản thu nào</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="section-title">Lịch sử ca làm của tôi</h2>
+      <div class="table-wrap">
+        <table class="t">
+          <thead><tr><th>Bắt đầu</th><th>Kết thúc</th><th>Thu trong ca</th></tr></thead>
+          <tbody>
+            <tr v-for="h in history" :key="h.id_ca">
+              <td>{{ h.gio_bat_dau.slice(0, 16) }}</td>
+              <td>{{ h.gio_ket_thuc ? h.gio_ket_thuc.slice(0, 16) : 'Đang mở' }}</td>
+              <td>{{ Number(h.tong_doanh_thu).toLocaleString() }}đ</td>
+            </tr>
+            <tr v-if="history.length === 0"><td colspan="3" class="muted" style="text-align:center">Chưa có ca nào</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.page { max-width: 1100px; margin: 0 auto; padding: 20px; }
-.staff-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+.top-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 12px; }
+.title { color: var(--color-primary); margin: 0; }
 .shift-box { display: flex; align-items: center; gap: 12px; }
-.btn-start { background: #16a34a; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
-.btn-end { background: #dc2626; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
-.stats { display: flex; gap: 15px; margin-bottom: 25px; }
-.stat-card { background: white; padding: 15px 25px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-.stat-card h2 { color: #2563eb; }
-.booking-table { width: 100%; border-collapse: collapse; background: white; border-radius: 10px; overflow: hidden; }
-.booking-table th, .booking-table td { padding: 10px; text-align: left; border-bottom: 1px solid #eee; font-size: 14px; }
-.booking-table th { background: #f1f5f9; }
-.badge { padding: 4px 10px; border-radius: 12px; font-size: 12px; color: white; background: #f59e0b; }
-.actions { display: flex; gap: 6px; }
-.btn-sm { padding: 5px 10px; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; background: #16a34a; color: white; }
-.btn-sm.blue { background: #2563eb; } .btn-sm.gray { background: #6b7280; }
+.warn { background: #fef3c7; color: #92400e; padding: 10px 14px; border-radius: 9px; font-size: 14px; margin: 0 0 16px; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+.bar { background: #f1f5f9; border-radius: 6px; height: 10px; min-width: 120px; }
+.bar-fill { background: var(--color-accent); height: 10px; border-radius: 6px; }
+.muted { color: var(--color-text-light); font-size: 13px; }
 </style>
