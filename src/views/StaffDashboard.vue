@@ -1,8 +1,8 @@
+<!-- src/views/StaffDashboard.vue -->
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { fetchAPI } from '../utils/api' // Thêm import
 
-const API = 'http://localhost:3000'
-const JSON_HEADERS = { 'Content-Type': 'application/json' }
 const user = JSON.parse(localStorage.getItem('user'))
 
 const bookingList = ref([])
@@ -12,32 +12,44 @@ const report = ref([])
 const kieu = ref('ngay')
 const kieuList = [{ v: 'ngay', l: 'Theo ngày' }, { v: 'thang', l: 'Theo tháng' }, { v: 'nam', l: 'Theo năm' }]
 
-async function getJson(url) { return (await fetch(`${API}${url}`)).json() }
-async function call(url, method, body) {
-  const res = await fetch(`${API}${url}`, { method, headers: JSON_HEADERS, body: body ? JSON.stringify(body) : undefined })
-  const data = await res.json()
-  if (!res.ok) { alert(data.error); return null }
-  return data
+async function loadReport() { 
+  try { report.value = await fetchAPI(`/api/doanhthu?kieu=${kieu.value}&id_nhan_vien=${user.id_tai_khoan}`) } 
+  catch(e) { console.error(e) }
 }
-
-async function loadReport() { report.value = await getJson(`/api/doanhthu?kieu=${kieu.value}&id_nhan_vien=${user.id_tai_khoan}`) }
 async function loadAll() {
-  bookingList.value = await getJson('/api/dondat')
-  ca.value = await getJson(`/api/ca/hien-tai/${user.id_tai_khoan}`)
-  history.value = await getJson(`/api/ca?id_nhan_vien=${user.id_tai_khoan}`)
-  await loadReport()
+  try {
+    bookingList.value = await fetchAPI('/api/dondat')
+    ca.value = await fetchAPI(`/api/ca/hien-tai/${user.id_tai_khoan}`)
+    history.value = await fetchAPI(`/api/ca?id_nhan_vien=${user.id_tai_khoan}`)
+    await loadReport()
+  } catch(e) { console.error(e) }
 }
 function chonKieu(v) { kieu.value = v; loadReport() }
 
-async function startShift() { if (await call('/api/ca/bat-dau', 'POST', { id_nhan_vien: user.id_tai_khoan })) loadAll() }
+async function startShift() { 
+  try { await fetchAPI('/api/ca/bat-dau', { method: 'POST' }); loadAll() } 
+  catch(e) { alert(e.message) }
+}
 async function endShift() {
   if (!confirm('Kết thúc ca làm việc?')) return
-  const data = await call(`/api/ca/${ca.value.id_ca}/ket-thuc`, 'PUT')
-  if (data) { alert(`Đã kết thúc ca.\nTổng thu trong ca: ${Number(data.tong_doanh_thu).toLocaleString()}đ`); loadAll() }
+  try {
+    const data = await fetchAPI(`/api/ca/${ca.value.id_ca}/ket-thuc`, { method: 'PUT' })
+    alert(`Đã kết thúc ca.\nTổng thu trong ca: ${Number(data.tong_doanh_thu).toLocaleString()}đ`); 
+    loadAll() 
+  } catch(e) { alert(e.message) }
 }
-async function confirmPayment(b) { if (await call(`/api/dondat/${b.id_don}/xacnhan-thanhtoan`, 'PUT', { id_nhan_vien: user.id_tai_khoan })) loadAll() }
-async function checkIn(b) { if (await call(`/api/dondat/${b.id_don}/checkin`, 'PUT')) loadAll() }
-async function checkOut(b) { if (await call(`/api/dondat/${b.id_don}/checkout`, 'PUT')) loadAll() }
+async function confirmPayment(b) { 
+  try { await fetchAPI(`/api/dondat/${b.id_don}/xacnhan-thanhtoan`, { method: 'PUT' }); loadAll() } 
+  catch(e) { alert(e.message) }
+}
+async function checkIn(b) { 
+  try { await fetchAPI(`/api/dondat/${b.id_don}/checkin`, { method: 'PUT' }); loadAll() } 
+  catch(e) { alert(e.message) }
+}
+async function checkOut(b) { 
+  try { await fetchAPI(`/api/dondat/${b.id_don}/checkout`, { method: 'PUT' }); loadAll() } 
+  catch(e) { alert(e.message) }
+}
 
 const totalPending = computed(() => bookingList.value.filter(b => b.trang_thai_don === 'Chờ duyệt').length)
 const maxRevenue = computed(() => Math.max(1, ...report.value.map(r => Number(r.doanh_thu))))

@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { fetchAPI } from '../utils/api'
 import { useRoute, useRouter } from 'vue-router'
 import NavBar from '../components/NavBar.vue'
 
@@ -15,9 +16,11 @@ const roomImages = {
 const getImage = (loai) => roomImages[loai] || roomImages.Standard
 
 async function loadRooms() {
-  const res = await fetch('http://localhost:3000/api/phong')
-  rooms.value = await res.json()
+  try {
+    rooms.value = await fetchAPI('/api/phong')
+  } catch(e) { console.error(e) }
 }
+
 onMounted(loadRooms)
 </script>
 

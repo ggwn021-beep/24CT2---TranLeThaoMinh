@@ -1,5 +1,6 @@
 <script setup>
 import { ref, onMounted } from 'vue'
+import { fetchAPI } from '../utils/api'
 import { useRoute, useRouter } from 'vue-router'
 
 const route = useRoute()
@@ -15,10 +16,12 @@ const roomImages = {
 
 async function loadRoom() {
   try {
-    const res = await fetch(`http://localhost:3000/api/phong/${route.params.id}`)
-    if (!res.ok) throw new Error()
-    room.value = await res.json()
-  } catch { room.value = null } finally { loading.value = false }
+    room.value = await fetchAPI(`/api/phong/${route.params.id}`)
+  } catch { 
+    room.value = null 
+  } finally { 
+    loading.value = false 
+  }
 }
 
 function bookRoom() {

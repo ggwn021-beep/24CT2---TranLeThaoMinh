@@ -1,8 +1,7 @@
+<!-- src/views/AdminDashboard.vue -->
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-
-const API = 'http://localhost:3000'
-const JSON_HEADERS = { 'Content-Type': 'application/json' }
+import { fetchAPI } from '../utils/api'
 
 const rooms = ref([])
 const bookings = ref([])
@@ -18,38 +17,65 @@ const newStaff = ref({ ho_ten: '', email: '', mat_khau: '' })
 const editingId = ref(null)
 const editForm = ref({})
 
-async function getJson(url) { return (await fetch(`${API}${url}`)).json() }
-async function call(url, method, body) {
-  const res = await fetch(`${API}${url}`, { method, headers: JSON_HEADERS, body: body ? JSON.stringify(body) : undefined })
-  const data = await res.json()
-  if (!res.ok) { alert(data.error); return null }
-  return data
+async function loadReport() { 
+  try { report.value = await fetchAPI(`/api/doanhthu?kieu=${kieu.value}`) } catch(e) { console.error(e) }
 }
-
-async function loadReport() { report.value = await getJson(`/api/doanhthu?kieu=${kieu.value}`) }
 async function loadAll() {
-  rooms.value = await getJson('/api/phong')
-  bookings.value = await getJson('/api/dondat')
-  stats.value = await getJson('/api/thongke')
-  staffList.value = await getJson('/api/nhanvien')
-  shifts.value = await getJson('/api/ca')
-  await loadReport()
+  try {
+    rooms.value = await fetchAPI('/api/phong')
+    bookings.value = await fetchAPI('/api/dondat')
+    stats.value = await fetchAPI('/api/thongke')
+    staffList.value = await fetchAPI('/api/nhanvien')
+    shifts.value = await fetchAPI('/api/ca')
+    await loadReport()
+  } catch(e) { console.error(e) }
 }
 function chonKieu(v) { kieu.value = v; loadReport() }
 
 async function addRoom() {
-  if (await call('/api/phong', 'POST', newRoom.value)) { newRoom.value = { ten_phong: '', loai_phong: 'Standard', gia_dem: '' }; loadAll() }
+  try {
+    await fetchAPI('/api/phong', { method: 'POST', body: JSON.stringify(newRoom.value) })
+    newRoom.value = { ten_phong: '', loai_phong: 'Standard', gia_dem: '' }
+    loadAll()
+  } catch(e) { alert(e.message) }
 }
 function startEdit(r) { editingId.value = r.id_phong; editForm.value = { ten_phong: r.ten_phong, loai_phong: r.loai_phong, gia_dem: Number(r.gia_dem), trang_thai: r.trang_thai } }
-async function saveEdit() { if (await call(`/api/phong/${editingId.value}`, 'PUT', editForm.value)) { editingId.value = null; loadAll() } }
-async function deleteRoom(id) { if (confirm('Xóa phòng này?') && await call(`/api/phong/${id}`, 'DELETE')) loadAll() }
+async function saveEdit() { 
+  try {
+    await fetchAPI(`/api/phong/${editingId.value}`, { method: 'PUT', body: JSON.stringify(editForm.value) })
+    editingId.value = null
+    loadAll()
+  } catch(e) { alert(e.message) }
+}
+async function deleteRoom(id) { 
+  if (!confirm('Xóa phòng này?')) return
+  try {
+    await fetchAPI(`/api/phong/${id}`, { method: 'DELETE' })
+    loadAll()
+  } catch(e) { alert(e.message) }
+}
 
 async function addStaff() {
-  if (await call('/api/nhanvien', 'POST', newStaff.value)) { newStaff.value = { ho_ten: '', email: '', mat_khau: '' }; loadAll() }
+  try {
+    await fetchAPI('/api/nhanvien', { method: 'POST', body: JSON.stringify(newStaff.value) })
+    newStaff.value = { ho_ten: '', email: '', mat_khau: '' }
+    loadAll()
+  } catch(e) { alert(e.message) }
 }
 async function toggleLock(nv) {
-  await call(`/api/nhanvien/${nv.id_tai_khoan}/${nv.trang_thai_tk === 'locked' ? 'mokhoa' : 'khoa'}`, 'PUT')
-  loadAll()
+  try {
+    const action = nv.trang_thai_tk === 'locked' ? 'mokhoa' : 'khoa'
+    await fetchAPI(`/api/nhanvien/${nv.id_tai_khoan}/${action}`, { method: 'PUT' })
+    loadAll()
+  } catch(e) { alert(e.message) }
+}
+// Hàm xóa nhân viên
+async function deleteStaff(nv) {
+  if (!confirm(`Bạn có chắc chắn muốn xóa nhân viên "${nv.ho_ten}"?`)) return
+  try {
+    await fetchAPI(`/api/nhanvien/${nv.id_tai_khoan}`, { method: 'DELETE' })
+    loadAll()
+  } catch(e) { alert(e.message) }
 }
 
 const maxRevenue = computed(() => Math.max(1, ...report.value.map(r => Number(r.doanh_thu))))
@@ -129,7 +155,7 @@ onMounted(loadAll)
         </table>
       </div>
 
-      <h2 class="section-title">Quản lý nhân viên</h2>
+      <h2 class="section-title">Quản lý nhân viên (Lễ tân)</h2>
       <div class="card card-pad add-form">
         <input v-model="newStaff.ho_ten" class="input" placeholder="Họ tên" />
         <input v-model="newStaff.email" class="input" placeholder="Email" />
@@ -138,12 +164,17 @@ onMounted(loadAll)
       </div>
       <div class="table-wrap" style="margin-top:14px">
         <table class="t">
-          <thead><tr><th>Họ tên</th><th>Email / Tên đăng nhập</th><th>Trạng thái</th><th></th></tr></thead>
+          <thead><tr><th>Họ tên</th><th>Email / Tên đăng nhập</th><th>Trạng thái</th><th>Thao tác</th></tr></thead>
           <tbody>
             <tr v-for="nv in staffList" :key="nv.id_tai_khoan">
               <td>{{ nv.ho_ten }}</td><td>{{ nv.email || nv.ten_dang_nhap }}</td>
               <td><span :class="['badge', nv.trang_thai_tk === 'locked' ? 'badge-red' : 'badge-green']">{{ nv.trang_thai_tk === 'locked' ? 'Đã khóa' : 'Hoạt động' }}</span></td>
-              <td><button class="btn btn-outline btn-sm" @click="toggleLock(nv)">{{ nv.trang_thai_tk === 'locked' ? 'Mở khóa' : 'Khóa' }}</button></td>
+              <td>
+                <div class="actions">
+                  <button class="btn btn-outline btn-sm" @click="toggleLock(nv)">{{ nv.trang_thai_tk === 'locked' ? 'Mở khóa' : 'Khóa' }}</button>
+                  <button class="btn btn-danger btn-sm" @click="deleteStaff(nv)">Xóa</button>
+                </div>
+              </td>
             </tr>
           </tbody>
         </table>

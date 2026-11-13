@@ -25,3 +25,20 @@ dist-ssr
 
 .env
 node_modules
+
+# Bỏ qua thư mục thư viện (Rất nặng, không cần up lên)
+node_modules/
+
+# Bỏ qua file chứa mật khẩu, API keys (CỰC KỲ QUAN TRỌNG)
+.env
+.env.local
+.env.production
+
+# Bỏ qua file build
+dist/
+build/
+
+# Bỏ qua file cấu hình của hệ điều hành/máy ảo
+.DS_Store
+Thumbs.db
+.vscode/

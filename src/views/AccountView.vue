@@ -1,5 +1,7 @@
+<!-- src/views/AccountView.vue -->
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { fetchAPI } from '../utils/api' // Đã thêm import này
 
 const user = JSON.parse(localStorage.getItem('user'))
 const orders = ref([])
@@ -11,38 +13,46 @@ const chatBox = ref(null)
 let timer
 
 async function loadOrders() {
-  orders.value = await (await fetch(`http://localhost:3000/api/dondat/khach/${user.id_tai_khoan}`)).json()
+  try {
+    orders.value = await fetchAPI(`/api/dondat/khach/${user.id_tai_khoan}`)
+  } catch (e) { console.error(e) }
 }
 async function loadMessages() {
-  messages.value = await (await fetch(`http://localhost:3000/api/tinnhan/khach/${user.id_tai_khoan}`)).json()
-  await nextTick()
-  if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight
+  try {
+    messages.value = await fetchAPI(`/api/tinnhan/khach/${user.id_tai_khoan}`)
+    await nextTick()
+    if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight
+  } catch (e) { console.error(e) }
 }
 async function cancelOrder(o) {
   if (!confirm('Bạn chắc chắn muốn hủy đơn này?')) return
-  const res = await fetch(`http://localhost:3000/api/dondat/${o.id_don}/huy`, { method: 'PUT' })
-  const data = await res.json()
-  if (!res.ok) return alert(data.error)
-  loadOrders()
+  try {
+    await fetchAPI(`/api/dondat/${o.id_don}/huy`, { method: 'PUT' })
+    loadOrders()
+  } catch (e) { alert(e.message) }
 }
 function openReview(o) { reviewing.value = o; review.value = { so_sao: 5, binh_luan: '' } }
 async function submitReview() {
-  await fetch('http://localhost:3000/api/danhgia', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id_don: reviewing.value.id_don, so_sao: review.value.so_sao, binh_luan: review.value.binh_luan })
-  })
-  reviewing.value = null
-  alert('Cảm ơn bạn đã đánh giá!')
-  loadOrders()
+  try {
+    await fetchAPI('/api/danhgia', {
+      method: 'POST',
+      body: JSON.stringify({ id_don: reviewing.value.id_don, so_sao: review.value.so_sao, binh_luan: review.value.binh_luan })
+    })
+    reviewing.value = null
+    alert('Cảm ơn bạn đã đánh giá!')
+    loadOrders()
+  } catch (e) { alert(e.message) }
 }
 async function sendMsg() {
   if (!newMsg.value.trim()) return
-  await fetch('http://localhost:3000/api/tinnhan', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id_khach_hang: user.id_tai_khoan, noi_dung: newMsg.value, nguoi_gui: 'customer' })
-  })
-  newMsg.value = ''
-  loadMessages()
+  try {
+    await fetchAPI('/api/tinnhan', {
+      method: 'POST',
+      body: JSON.stringify({ id_khach_hang: user.id_tai_khoan, noi_dung: newMsg.value, nguoi_gui: 'customer' })
+    })
+    newMsg.value = ''
+    loadMessages()
+  } catch (e) { alert(e.message) }
 }
 function badgeClass(t) {
   return { 'Chờ duyệt': 'badge-orange', 'Đã xác nhận': 'badge-blue', 'Đã check-in': 'badge-green', 'Đã hoàn tất': 'badge-gray', 'Đã hủy': 'badge-red' }[t] || 'badge-gray'

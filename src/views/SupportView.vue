@@ -1,5 +1,7 @@
+<!-- src/views/SupportView.vue -->
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { fetchAPI } from '../utils/api' // Thêm import
 
 const allMessages = ref([])
 const reviews = ref([])
@@ -19,21 +21,25 @@ const avgStars = computed(() => reviews.value.length
   ? (reviews.value.reduce((s, r) => s + r.so_sao, 0) / reviews.value.length).toFixed(1) : '—')
 
 async function loadMessages() {
-  allMessages.value = await (await fetch('http://localhost:3000/api/tinnhan')).json()
-  await nextTick()
-  if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight
+  try {
+    allMessages.value = await fetchAPI('/api/tinnhan')
+    await nextTick()
+    if (chatBox.value) chatBox.value.scrollTop = chatBox.value.scrollHeight
+  } catch(e) { console.error(e) }
 }
 async function loadReviews() {
-  reviews.value = await (await fetch('http://localhost:3000/api/danhgia')).json()
+  try { reviews.value = await fetchAPI('/api/danhgia') } catch(e) { console.error(e) }
 }
 async function sendReply() {
   if (!reply.value.trim() || !selectedId.value) return
-  await fetch('http://localhost:3000/api/tinnhan', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ id_khach_hang: selectedId.value, noi_dung: reply.value, nguoi_gui: 'staff' })
-  })
-  reply.value = ''
-  loadMessages()
+  try {
+    await fetchAPI('/api/tinnhan', {
+      method: 'POST',
+      body: JSON.stringify({ id_khach_hang: selectedId.value, noi_dung: reply.value, nguoi_gui: 'staff' })
+    })
+    reply.value = ''
+    loadMessages()
+  } catch(e) { alert(e.message) }
 }
 const stars = n => '★'.repeat(n) + '☆'.repeat(5 - n)
 

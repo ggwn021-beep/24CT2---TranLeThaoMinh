@@ -1,6 +1,8 @@
+<!-- src/views/BookingView.vue -->
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { fetchAPI } from '../utils/api'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,13 +15,29 @@ const form = ref({ checkin: '', checkout: '' })
 const paymentMethod = ref('qr')
 const step = ref(1)
 const submitting = ref(false)
-const tongTien = ref(0)
+const bookingResult = ref(null)
 
 onMounted(() => {
   const saved = localStorage.getItem('user')
-  if (!saved) { alert('Vui lòng đăng nhập trước khi đặt phòng'); router.push('/login'); return }
+  if (!saved) { 
+    alert('Vui lòng đăng nhập trước khi đặt phòng'); 
+    router.push('/login'); 
+    return 
+  }
   user.value = JSON.parse(saved)
 })
+
+const totalPrice = computed(() => {
+  if (!form.value.checkin || !form.value.checkout) return 0;
+  const days = (new Date(form.value.checkout) - new Date(form.value.checkin)) / (1000 * 60 * 60 * 24);
+  return days > 0 ? days * price : 0;
+});
+
+const qrUrl = computed(() => {
+  const amount = totalPrice.value;
+  const addInfo = `Thanh toan phong ${roomType}`;
+  return `https://img.vietqr.io/image/MB-0123456789-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(addInfo)}&accountName=SUNRISE%20HOTEL`;
+});
 
 async function submitBooking() {
   if (!form.value.checkin || !form.value.checkout) { alert('Vui lòng chọn ngày nhận/trả phòng'); return }
@@ -27,30 +45,27 @@ async function submitBooking() {
   if (form.value.checkin < today) { alert('Ngày nhận phòng không được ở quá khứ'); return }
   if (form.value.checkout <= form.value.checkin) { alert('Ngày trả phòng phải sau ngày nhận phòng'); return }
   const soNgay = (new Date(form.value.checkout) - new Date(form.value.checkin)) / (1000 * 60 * 60 * 24)
-  if (soNgay > 30) { alert('Thời gian đặt phòng tối đa là 30 đêm, vui lòng liên hệ lễ tân nếu muốn đặt dài hạn'); return }
-  tongTien.value = price * soNgay
+  if (soNgay > 30) { alert('Thời gian đặt phòng tối đa là 30 đêm'); return }
 
   submitting.value = true
   try {
-    const res = await fetch('http://localhost:3000/api/dondat', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const data = await fetchAPI('/api/dondat', {
+      method: 'POST',
       body: JSON.stringify({
-        id_tai_khoan: user.value.id_tai_khoan,
         id_phong: roomId,
         ngay_nhan_phong: form.value.checkin,
         ngay_tra_phong: form.value.checkout,
-        tong_tien: tongTien.value,
         phuong_thuc_thanh_toan: paymentMethod.value === 'qr' ? 'Chuyển khoản QR' : 'Tại quầy'
       })
     })
-    const data = await res.json()
-    if (!res.ok) { alert(data.error); submitting.value = false; return }
+    bookingResult.value = data;
     step.value = 2
-  } catch { alert('Không kết nối được server') }
-  submitting.value = false
+  } catch (error) {
+    alert(error.message)
+  } finally {
+    submitting.value = false
+  }
 }
-
-function finish() { router.push('/') }
 </script>
 
 <template>
@@ -73,6 +88,10 @@ function finish() { router.push('/') }
           <div><label class="field-label">Trả phòng</label><input v-model="form.checkout" type="date" class="input" /></div>
         </div>
 
+        <div v-if="totalPrice > 0" class="alert info">
+          Tạm tính: <strong>{{ totalPrice.toLocaleString() }}đ</strong> cho {{ (totalPrice/price) }} đêm.
+        </div>
+
         <h3 style="margin-top:22px">Phương thức thanh toán</h3>
         <label :class="['pay-option', { active: paymentMethod === 'qr' }]">
           <input type="radio" value="qr" v-model="paymentMethod" /> Chuyển khoản / QR Code
@@ -86,12 +105,20 @@ function finish() { router.push('/') }
         </button>
       </div>
 
-      <div v-if="step === 2" class="card card-pad done-box">
+      <div v-if="step === 2 && bookingResult" class="card card-pad done-box">
         <div class="check">✅</div>
-        <h3>Đặt phòng thành công</h3>
-        <p v-if="paymentMethod === 'qr'">Vui lòng chuyển khoản <strong>{{ tongTien.toLocaleString() }}đ</strong>, nhân viên sẽ xác nhận khi nhận được tiền.</p>
-        <p v-else>Vui lòng thanh toán <strong>{{ price.toLocaleString() }}đ</strong> khi nhận phòng tại quầy.</p>
-        <button class="btn btn-primary btn-block" style="margin-top:16px" @click="finish">Về trang chủ</button>
+        <h3>Đặt phòng thành công!</h3>
+        <p>Mã đơn hàng: <strong>#{{ bookingResult.id_don }}</strong></p>
+        
+        <div v-if="paymentMethod === 'qr'" class="qr-container">
+          <p>Vui lòng quét mã QR dưới đây để thanh toán:</p>
+          <img :src="qrUrl" alt="Mã QR Thanh Toán" class="qr-img" />
+          <p>Số tiền: <strong>{{ bookingResult.tong_tien.toLocaleString() }}đ</strong></p>
+          <p class="muted">Hệ thống sẽ tự động xác nhận sau khi nhận được tiền.</p>
+        </div>
+        <p v-else>Vui lòng thanh toán <strong>{{ bookingResult.tong_tien.toLocaleString() }}đ</strong> khi nhận phòng tại quầy.</p>
+        
+        <button class="btn btn-primary btn-block" style="margin-top:16px" @click="router.push('/account')">Xem đơn của tôi</button>
       </div>
     </div>
   </div>
@@ -110,4 +137,7 @@ h3 { color: var(--color-primary); margin: 0 0 12px; font-size: 16px; }
 .pay-option.active { border-color: var(--color-accent); background: #fdf8ef; }
 .done-box { text-align: center; margin-top: 18px; }
 .check { font-size: 36px; }
+.qr-container { text-align: center; margin-top: 15px; padding: 15px; background: #f8fafc; border-radius: 10px; }
+.qr-img { width: 200px; height: 200px; margin: 10px auto; display: block; border: 1px solid #ddd; border-radius: 8px; }
+.alert.info { background: #e0f2fe; color: #0369a1; padding: 10px; border-radius: 8px; margin-top: 10px; font-size: 14px; }
 </style>

@@ -4,6 +4,7 @@ import mysql from 'mysql2';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import nodemailer from 'nodemailer';
 
 const app = express();
 app.use(cors());
@@ -23,6 +24,56 @@ db.connect((err) => {
     else console.log('Đã kết nối Database thành công!');
 });
 
+// TẠO TÀI KHOẢN EMAIL TEST TỰ ĐỘNG (Không cần mật khẩu)
+let transporter;
+nodemailer.createTestAccount((err, account) => {
+    if (err) {
+        console.error('Không tạo được tài khoản test mail', err);
+        return;
+    }
+    transporter = nodemailer.createTransport({
+        host: account.smtp.host,
+        port: account.smtp.port,
+        secure: account.smtp.secure,
+        auth: { user: account.user, pass: account.pass }
+    });
+    console.log('Đã sẵn sàng hệ thống Email Test!');
+});
+
+const sendBookingEmail = async (email, tenKhach, tenPhong, ngayNhan, ngayTra, tongTien) => {
+    if (!transporter) return; // Nếu chưa kịp khởi tạo thì bỏ qua
+    try {
+        const info = await transporter.sendMail({
+            from: '"Sunrise Hotel & Resort" <no-reply@sunrise.com>',
+            to: email,
+            subject: 'Xác nhận đặt phòng thành công - Sunrise Hotel & Resort',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #ddd; padding: 20px; border-radius: 10px;">
+                    <h2 style="color: #1b2a4a; text-align: center;">🏨 Sunrise Hotel & Resort</h2>
+                    <h3>Xin chào ${tenKhach},</h3>
+                    <p>Cảm ơn bạn đã lựa chọn Sunrise Hotel & Resort. Đơn đặt phòng của bạn đã được ghi nhận thành công!</p>
+                    <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+                        <tr><td style="padding: 8px; border-bottom: 1px solid #eee;"><strong>Phòng:</strong></td><td style="padding: 8px; border-bottom: 1px solid #eee;">${tenPhong}</td></tr>
+                        <tr><td style="padding: 8px; border-bottom: 1px solid #eee;"><strong>Ngày nhận:</strong></td><td style="padding: 8px; border-bottom: 1px solid #eee;">${ngayNhan}</td></tr>
+                        <tr><td style="padding: 8px; border-bottom: 1px solid #eee;"><strong>Ngày trả:</strong></td><td style="padding: 8px; border-bottom: 1px solid #eee;">${ngayTra}</td></tr>
+                        <tr><td style="padding: 8px; border-bottom: 1px solid #eee;"><strong>Tổng tiền:</strong></td><td style="padding: 8px; border-bottom: 1px solid #eee; color: #d97706; font-weight: bold;">${Number(tongTien).toLocaleString()} VNĐ</td></tr>
+                    </table>
+                    <p style="margin-top: 20px;">Vui lòng đến quầy lễ tân để làm thủ tục nhận phòng đúng giờ.</p>
+                    <p style="text-align: center; color: #888; font-size: 12px; margin-top: 30px;">© 2026 Sunrise Hotel & Resort</p>
+                </div>
+            `
+        });
+        console.log(`\n=========================================`);
+        console.log(`ĐÃ GỬI EMAIL THÀNH CÔNG TỚI: ${email}`);
+        // IN RA ĐƯỜNG LINK ĐỂ BẠN XEM EMAIL (DÀNH CHO DEMO)
+        console.log(`BẤM VÀO LINK NÀY ĐỂ XEM EMAIL: ${nodemailer.getTestMessageUrl(info)}`);
+        console.log(`=========================================\n`);
+    } catch (error) {
+        console.log('Lỗi gửi email:', error);
+    }
+};
+// ... (Phần còn lại của server.js giữ nguyên)
+
 // ================= TIỆN ÍCH DÙNG CHUNG =================
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_RE = /^0\d{9}$/;
@@ -31,7 +82,7 @@ const matKhauHopLe = (mk) => typeof mk === 'string' && mk.length >= 6 && /[A-Za-
 const loi = (res, ma, noiDung) => res.status(ma).json({ error: noiDung });
 const loiServer = (res) => loi(res, 500, 'Lỗi server');
 
-// ================= XÁC THỰC: server biết "ai đang gọi" =================
+// ================= XÁC THỰC =================
 const JWT_SECRET = process.env.JWT_SECRET || 'sunrise-doi-khoa-nay-trong-env';
 const taoToken = (u) => jwt.sign({ id: u.id_tai_khoan, vai_tro: u.vai_tro }, JWT_SECRET, { expiresIn: '8h' });
 
@@ -42,7 +93,7 @@ function xacThuc(req, res, next) {
     let payload;
     try { payload = jwt.verify(token, JWT_SECRET); }
     catch { return loi(res, 401, 'Phiên đăng nhập đã hết hạn, vui lòng đăng nhập lại'); }
-    // Vai trò và trạng thái khóa luôn lấy lại từ database: admin khóa tài khoản là có hiệu lực ngay
+    
     db.query('SELECT vai_tro, trang_thai_tk FROM TaiKhoan WHERE id_tai_khoan = ?', [payload.id], (err, rows) => {
         if (err) return loiServer(res);
         if (rows.length === 0 || rows[0].trang_thai_tk === 'locked') return loi(res, 401, 'Tài khoản không còn hiệu lực');
@@ -53,7 +104,7 @@ function xacThuc(req, res, next) {
 const chiVaiTro = (...dsVaiTro) => (req, res, next) =>
     dsVaiTro.includes(req.user.vai_tro) ? next() : loi(res, 403, 'Bạn không có quyền thực hiện thao tác này');
 
-// ================= CÔNG KHAI (không cần đăng nhập) =================
+// ================= CÔNG KHAI =================
 app.get('/api/phong', (req, res) => {
     db.query('SELECT * FROM Phong', (err, rows) => (err ? loiServer(res) : res.json(rows)));
 });
@@ -103,7 +154,7 @@ app.post('/api/login', (req, res) => {
         if (user.mat_khau.startsWith('$2')) {
             ok = await bcrypt.compare(mat_khau, user.mat_khau);
         } else if (user.mat_khau === mat_khau) {
-            ok = true; // tài khoản cũ còn mật khẩu chữ thường: tự mã hóa ngay lần đăng nhập đầu
+            ok = true;
             const hash = await bcrypt.hash(mat_khau, 10);
             db.query('UPDATE TaiKhoan SET mat_khau = ? WHERE id_tai_khoan = ?', [hash, user.id_tai_khoan]);
         }
@@ -115,7 +166,7 @@ app.post('/api/login', (req, res) => {
     });
 });
 
-// ================= TÀI KHOẢN CỦA TÔI (cần token) =================
+// ================= TÀI KHOẢN =================
 const COT_CONG_KHAI = 'id_tai_khoan, ten_dang_nhap, email, so_dien_thoai, ho_ten, vai_tro';
 
 app.get('/api/me', xacThuc, (req, res) => {
@@ -155,6 +206,21 @@ app.put('/api/me/mat-khau', xacThuc, (req, res) => {
     });
 });
 
+// API: Khách hàng tự xóa tài khoản của mình
+app.delete('/api/me', xacThuc, chiVaiTro('customer'), (req, res) => {
+    // Kiểm tra xem khách có đơn nào đang chạy không
+    db.query("SELECT id_don FROM DonDatPhong WHERE id_tai_khoan = ? AND trang_thai_don NOT IN ('Đã hủy', 'Đã hoàn tất')", [req.user.id], (err, orders) => {
+        if (err) return loiServer(res);
+        if (orders.length > 0) return loi(res, 400, 'Bạn đang có đơn đặt phòng chưa hoàn tất, không thể xóa tài khoản!');
+        
+        // Xóa mềm: Khóa tài khoản và xóa thông tin cá nhân (giữ lại ID để lưu lịch sử đơn hàng)
+        db.query("UPDATE TaiKhoan SET trang_thai_tk = 'locked', ho_ten = 'Tài khoản đã xóa', email = NULL, so_dien_thoai = NULL WHERE id_tai_khoan = ?", [req.user.id], (err2) => {
+            if (err2) return loiServer(res);
+            res.json({ message: 'Tài khoản đã được xóa vĩnh viễn' });
+        });
+    });
+});
+
 // ================= KHÁCH HÀNG =================
 app.post('/api/dondat', xacThuc, chiVaiTro('customer'), (req, res) => {
     const { id_phong, ngay_nhan_phong, ngay_tra_phong, phuong_thuc_thanh_toan } = req.body;
@@ -166,7 +232,7 @@ app.post('/api/dondat', xacThuc, chiVaiTro('customer'), (req, res) => {
     const soDem = Math.round((new Date(ngay_tra_phong) - new Date(ngay_nhan_phong)) / 86400000);
     if (soDem > 30) return loi(res, 400, 'Thời gian đặt phòng tối đa là 30 đêm');
 
-    db.query('SELECT gia_dem, trang_thai FROM Phong WHERE id_phong = ?', [id_phong], (err, ph) => {
+    db.query('SELECT gia_dem, trang_thai, ten_phong FROM Phong WHERE id_phong = ?', [id_phong], (err, ph) => {
         if (err) return loiServer(res);
         if (ph.length === 0) return loi(res, 404, 'Không tìm thấy phòng');
         if (ph[0].trang_thai === 'Bảo trì') return loi(res, 409, 'Phòng đang bảo trì');
@@ -186,7 +252,14 @@ app.post('/api/dondat', xacThuc, chiVaiTro('customer'), (req, res) => {
                 db.query("INSERT INTO DonDatPhong (id_tai_khoan, id_phong, ngay_nhan_phong, ngay_tra_phong, tong_tien, trang_thai_don, phuong_thuc_thanh_toan) VALUES (?, ?, ?, ?, ?, 'Chờ duyệt', ?)",
                     [req.user.id, id_phong, ngay_nhan_phong, ngay_tra_phong, tongTien, phuong_thuc_thanh_toan || 'Tại quầy'], (err4, kq) => {
                         if (err4) return loiServer(res);
-                        res.json({ message: 'Đặt phòng thành công', id_don: kq.insertId, tong_tien: tongTien });
+                        
+                        // GỬI EMAIL XÁC NHẬN
+                        db.query('SELECT email, ho_ten FROM TaiKhoan WHERE id_tai_khoan = ?', [req.user.id], (err5, userRows) => {
+                            if (!err5 && userRows.length > 0 && userRows[0].email) {
+                                sendBookingEmail(userRows[0].email, userRows[0].ho_ten, ph[0].ten_phong, ngay_nhan_phong, ngay_tra_phong, tongTien);
+                            }
+                            res.json({ message: 'Đặt phòng thành công', id_don: kq.insertId, tong_tien: tongTien });
+                        });
                     });
             });
         });
@@ -229,7 +302,7 @@ app.post('/api/danhgia', xacThuc, chiVaiTro('customer'), (req, res) => {
     });
 });
 
-// ================= TIN NHẮN HỖ TRỢ =================
+// ================= TIN NHẮN & HỖ TRỢ =================
 app.get('/api/tinnhan/khach/:id', xacThuc, (req, res) => {
     if (req.user.vai_tro === 'customer' && String(req.user.id) !== req.params.id) return loi(res, 403, 'Bạn chỉ xem được tin nhắn của chính mình');
     db.query('SELECT * FROM TinNhan WHERE id_khach_hang = ? ORDER BY thoi_gian ASC', [req.params.id], (err, rows) => (err ? loiServer(res) : res.json(rows)));
@@ -262,7 +335,7 @@ app.get('/api/danhgia', xacThuc, chiVaiTro('staff', 'admin'), (req, res) => {
     db.query(sql, (err, rows) => (err ? loiServer(res) : res.json(rows)));
 });
 
-// ================= LỄ TÂN (STAFF) =================
+// ================= LỄ TÂN =================
 app.get('/api/dondat', xacThuc, chiVaiTro('staff', 'admin'), (req, res) => {
     const sql = `SELECT d.*, p.ten_phong, p.loai_phong, t.ho_ten AS ten_khach
         FROM DonDatPhong d
@@ -341,7 +414,6 @@ app.put('/api/dondat/:id/checkin', xacThuc, chiVaiTro('staff'), (req, res) =>
 app.put('/api/dondat/:id/checkout', xacThuc, chiVaiTro('staff'), (req, res) =>
     doiTrangThai(res, req.params.id, 'Đã check-in', 'Đã hoàn tất', 'Sẵn sàng', 'Đã check-out'));
 
-// ================= DOANH THU (staff xem của mình, admin xem tất cả) =================
 app.get('/api/doanhthu', xacThuc, chiVaiTro('staff', 'admin'), (req, res) => {
     const dinhDang = { ngay: '%Y-%m-%d', thang: '%Y-%m', nam: '%Y' }[req.query.kieu] || '%Y-%m-%d';
     const idNV = req.user.vai_tro === 'staff' ? req.user.id : req.query.id_nhan_vien;
@@ -351,7 +423,7 @@ app.get('/api/doanhthu', xacThuc, chiVaiTro('staff', 'admin'), (req, res) => {
     db.query(sql, idNV ? [idNV] : [], (err, rows) => (err ? loiServer(res) : res.json(rows)));
 });
 
-// ================= QUẢN TRỊ (ADMIN) =================
+// ================= QUẢN TRỊ =================
 app.get('/api/thongke', xacThuc, chiVaiTro('admin'), (req, res) => {
     db.query('SELECT COALESCE(SUM(tong_tien), 0) AS doanh_thu FROM DonDatPhong WHERE thoi_gian_thu IS NOT NULL', (err, r1) => {
         if (err) return loiServer(res);
@@ -417,6 +489,19 @@ app.put('/api/nhanvien/:id/khoa', xacThuc, chiVaiTro('admin'), (req, res) => {
 });
 app.put('/api/nhanvien/:id/mokhoa', xacThuc, chiVaiTro('admin'), (req, res) => {
     db.query("UPDATE TaiKhoan SET trang_thai_tk = 'active' WHERE id_tai_khoan = ? AND vai_tro = 'staff'", [req.params.id], (err) => (err ? loiServer(res) : res.json({ message: 'Đã mở khóa' })));
+});
+
+// API: Admin xóa nhân viên (chỉ xóa được nếu chưa có lịch sử ca làm)
+app.delete('/api/nhanvien/:id', xacThuc, chiVaiTro('admin'), (req, res) => {
+    db.query("SELECT id_ca FROM CaLamViec WHERE id_nhan_vien = ? LIMIT 1", [req.params.id], (err, cas) => {
+        if (err) return loiServer(res);
+        if (cas.length > 0) return loi(res, 400, 'Nhân viên này đã có lịch sử ca làm việc, chỉ có thể Khóa tài khoản (không được xóa)');
+        
+        db.query("DELETE FROM TaiKhoan WHERE id_tai_khoan = ? AND vai_tro = 'staff'", [req.params.id], (err2) => {
+            if (err2) return loiServer(res);
+            res.json({ message: 'Đã xóa nhân viên' });
+        });
+    });
 });
 
 const CONG = process.env.PORT || 3000;
